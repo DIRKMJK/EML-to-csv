@@ -1,6 +1,6 @@
 # Election Markup Language (EML) to csv converter
 
-Election Markup Language ([EML][eml]) is an international standard for storing election data. The Dutch Electoral Council (Kiesraad) uses the EML format to publish election results per candidate, per polling station. 
+Election Markup Language ([EML][eml]) is an international standard for storing election data. The Dutch Electoral Council (Kiesraad) uses the EML format to publish election results per candidate, per polling station. For background information, see [this][blog] blog post.
 
 The script `parse_eml.py` converts EML files from the Kiesraad to csv files.
 
@@ -19,3 +19,4 @@ The script `parse_eml.py` converts EML files from the Kiesraad to csv files.
 
 [data]:https://data.overheid.nl/data/dataset?maintainer_facet=http%3A%2F%2Fstandaarden.overheid.nl%2Fowms%2Fterms%2FKiesraad
 [eml]:https://en.wikipedia.org/wiki/Election_Markup_Language
+[blog]:https://dirkmjk.nl/en/2018/07/converting-election-markup-language-eml-csv
