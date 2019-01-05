@@ -17,6 +17,6 @@ The script `parse_eml.py` converts EML files from the Kiesraad to csv files.
 - I have no idea whether non-Dutch election results in EML format can be parsed with this script.
 - Please check the results; they are not guaranteed to be accurate.
 
-[data]:https://data.overheid.nl/data/dataset?maintainer_facet=http%3A%2F%2Fstandaarden.overheid.nl%2Fowms%2Fterms%2FKiesraad
+[data]:https://data.overheid.nl/data/dataset?q=kiesraad&tags=uitslag&maintainer_facet=http%3A%2F%2Fstandaarden.overheid.nl%2Fowms%2Fterms%2FKiesraad&sort=score+desc%2C+metadata_modified+desc
 [eml]:https://en.wikipedia.org/wiki/Election_Markup_Language
 [blog]:https://dirkmjk.nl/en/2018/07/converting-election-markup-language-eml-csv
