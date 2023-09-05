@@ -6,12 +6,12 @@ import pandas as pd
 DATA_FOLDER = Path('../data/')
 
 
-def read_eml(path):
+def read_eml(path: Path):
 
     """Convert EML file to dictionary"""
 
     try:
-        return xmltodict.parse(path.read_text())
+        return xmltodict.parse(path.read_text(encoding="utf-8"))
 
     except UnicodeDecodeError as e:
         print(path.name)
@@ -44,15 +44,26 @@ def parse_election_data(data):
 
     rows_aggregates = []
     rows_per_candidate = []
+    rows_turnout = []
 
     contest = (data['EML']
                    ['Count']
                    ['Election']
                    ['Contests']
                    ['Contest'])
+    
+    try:
+        contest_name = (data['EML']
+                            ['Count']
+                            ['Election']
+                            ['ElectionIdentifier']
+                            ['ElectionName'])
+    except KeyError:
+        contest_name = None
 
     try:
-        contest_name = contest['ContestIdentifier']['ContestName']
+        if not contest_name:
+            contest_name = contest['ContestIdentifier']['ContestName']
     except KeyError:
         contest_name = None
 
@@ -64,6 +75,76 @@ def parse_election_data(data):
     except KeyError:
         managing_authority = None
 
+    
+    # base row template
+    item = {
+        'contest_name': contest_name,
+        'managing_authority': managing_authority
+    }
+
+    # total row template
+    total_item = item.copy()
+    total_item["station_id"] = "TOTAL"
+    total_item["station_name"] = "TOTAL"
+
+    # extract top level totals
+    total = contest["TotalVotes"]
+    try:
+        results = total['Selection']
+    except TypeError:
+        results = []
+
+    # party votes
+    row_aggregate = total_item.copy()
+    for result in results:
+        if 'AffiliationIdentifier' in result.keys():
+            party_name = result['AffiliationIdentifier']['RegisteredName']
+            party_id = result['AffiliationIdentifier']['@Id']
+            if pd.isnull(party_name):
+                party_name = party_id
+            votes = int(result['ValidVotes'])
+            row_aggregate[party_name] = votes
+
+        # candidate votes
+        elif PER_CANDIDATE.lower() in ['y', 'yes']:
+            row_cand = total_item.copy()
+            row_cand['party_name'] = party_name
+            row_cand['party_id'] = party_id
+            candidate_id = (result['Candidate']
+                                    ['CandidateIdentifier']
+                                    ['@Id'])
+            row_cand['candidate_identifier'] = candidate_id
+            row_cand['votes'] = result['ValidVotes']
+            rows_per_candidate.append(row_cand)
+    
+    rows_aggregates.append(row_aggregate)
+
+    # turnout, counted, rejected, invalid votes
+    if TURNOUT.lower() in ['y', 'yes']:
+        turnout_row = total_item.copy()
+        
+        try:
+            turnout_row["cast"] = int(total["Cast"])
+            turnout_row["counted"] = int(total["TotalCounted"])
+
+            try:
+                for rejected in total["RejectedVotes"]:
+                    turnout_row["rejected: " + rejected["@ReasonCode"]] = int(rejected["#text"])
+            except KeyError:
+                pass
+                    
+            try:
+                for uncounted in total["UncountedVotes"]:
+                    turnout_row["uncounted: " + uncounted["@ReasonCode"]] = int(uncounted["#text"])
+            except KeyError:
+                pass
+
+            rows_turnout.append(turnout_row)
+        
+        except TypeError:
+            pass
+
+    # start per station votes
     try:
         stations = contest['ReportingUnitVotes']
     except KeyError:
@@ -73,32 +154,28 @@ def parse_election_data(data):
             'managing_authority': managing_authority,
             'station_name': None,
             'station_id': None
-            }]
+        }]
+        
 
     for station in stations:
-
-        item = {
-            'contest_name': contest_name,
-            'managing_authority': managing_authority
-            }
+        row_item = item.copy()
+        
+        try:
+            row_item['station_id'] = station['ReportingUnitIdentifier']['@Id']
+        except TypeError:
+            row_item['station_id'] = None
 
         try:
-            item['station_id'] = station['ReportingUnitIdentifier']['@Id']
+            row_item['station_name'] = station['ReportingUnitIdentifier']['#text']
         except TypeError:
-            item['station_id'] = None
-
-        try:
-            item['station_name'] = station['ReportingUnitIdentifier']['#text']
-        except TypeError:
-            item['station_name'] = None
+            row_item['station_name'] = None
 
         try:
             results = station['Selection']
         except TypeError:
             results = []
 
-        row_aggregate = item.copy()
-
+        row_aggregate = row_item.copy()
         for result in results:
 
             if 'AffiliationIdentifier' in result.keys():
@@ -119,10 +196,36 @@ def parse_election_data(data):
                 row_cand['candidate_identifier'] = candidate_id
                 row_cand['votes'] = result['ValidVotes']
                 rows_per_candidate.append(row_cand)
-
+        
         rows_aggregates.append(row_aggregate)
 
-    return (rows_aggregates, rows_per_candidate, contest_name, managing_authority)
+
+        if TURNOUT.lower() in ['y', 'yes']:
+            turnout_row = row_item.copy()
+            
+            try:
+                turnout_row["cast"] = int(station["Cast"])
+                turnout_row["counted"] = int(station["TotalCounted"])
+
+                try:
+                    for rejected in station["RejectedVotes"]:
+                        turnout_row["rejected: " + rejected["@ReasonCode"]] = int(rejected["#text"])
+                except KeyError:
+                    pass
+                        
+                try:
+                    for uncounted in station["UncountedVotes"]:
+                        turnout_row["uncounted: " + uncounted["@ReasonCode"]] = int(uncounted["#text"])
+                except KeyError:
+                    pass
+
+                rows_turnout.append(turnout_row)
+            
+            except TypeError:
+                pass
+
+
+    return (rows_aggregates, rows_per_candidate, rows_turnout, contest_name, managing_authority)
 
 
 def process_files():
@@ -139,13 +242,18 @@ def process_files():
         name = path.name.split('.')[0]
 
         data = read_eml(path)
-        (rows_aggregates, rows_per_candidate, contest_name, 
+        (rows_aggregates, rows_per_candidate, rows_turnout, contest_name, 
             managing_authority) = parse_election_data(data)
 
         if PER_CANDIDATE.lower() in ['y', 'yes']:
             filename = '{} per candidate.csv'.format(name)
             df = pd.DataFrame(rows_per_candidate)
-            df.to_csv(str(VOTE_COUNTS / filename), index=False)
+            df.to_csv(str(VOTE_COUNTS / filename), index=False, encoding="utf-8")
+
+        if TURNOUT.lower() in ['y', 'yes']:
+            filename = '{} turnout.csv'.format(name)
+            df = pd.DataFrame(rows_turnout)
+            df.to_csv(str(VOTE_COUNTS / filename), index=False, encoding="utf-8")
 
         filename = '{} aggregate.csv'.format(name)
         df = pd.DataFrame(rows_aggregates)
@@ -155,7 +263,7 @@ def process_files():
             ]
         columns = first_cols + [c for c in df.columns if c not in first_cols]
         df = df[columns]
-        df.to_csv(str(VOTE_COUNTS / filename), index=False)
+        df.to_csv(str(VOTE_COUNTS / filename), index=False, encoding="utf-8")
 
 
 def parse_candidates(data, rows):
@@ -271,7 +379,7 @@ def create_candidate_list():
     df = pd.DataFrame(rows)
 
     path = TARGET / 'candidates.csv'
-    df.to_csv(str(path), index=False)
+    df.to_csv(str(path), index=False, encoding="utf-8")
 
 
 if __name__ == '__main__':
@@ -285,6 +393,10 @@ if __name__ == '__main__':
     print('\nDo you also want to create a csv with results per candidate?')
     print('This will take up more disk space (~1GB)\n')
     PER_CANDIDATE = input('Per candidate (y/n): ')
+
+    print('\nDo you also want to create a csv with turnout, uncounted, and rejected votes?')
+    print('This will take up more disk space (~100MB)\n')
+    TURNOUT = input('Turnout (y/n): ')
 
     start = dt.datetime.now()
 
